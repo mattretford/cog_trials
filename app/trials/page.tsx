@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { TrialFilters } from "@/components/trial-filters";
+import { parseTrialFilters, parseTrialPage, trialsHref, hasTrialFilters, type SearchParams } from "@/lib/clinical-trials/filters";
 import { TrialCard } from "@/components/trial-card";
 import { TRIAL_SEARCH_TERMS } from "@/lib/clinical-trials/search";
 import { getTrials, TRIALS_PER_PAGE } from "@/lib/supabase/trials";
@@ -9,12 +11,13 @@ export const metadata: Metadata = { title: "Trials" };
 export default async function TrialsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string | string[] }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
-  const rawPage = typeof params.page === "string" ? Number(params.page) : 1;
-  const page = Number.isSafeInteger(rawPage) && rawPage >= 1 && rawPage <= 10000 ? rawPage : 1;
-  const result = await getTrials(page);
+  const page = parseTrialPage(params);
+  const filters = parseTrialFilters(params);
+  const filtered = hasTrialFilters(filters);
+  const result = await getTrials(page, filters);
 
   return (
     <div>
@@ -35,6 +38,9 @@ export default async function TrialsPage({
           and countries are included. Results may include broadly related studies.
         </p>
       </section>
+      {result.state === "ready" && (
+        <TrialFilters key={trialsHref(filters, page)} filters={filters} options={result.options} />
+      )}
       {result.state !== "ready" ? (
         <section className="mt-8 rounded-xl border border-slate-200 bg-white p-8" aria-labelledby="collection-status">
           <h2 id="collection-status" className="text-xl font-semibold">
@@ -45,12 +51,12 @@ export default async function TrialsPage({
               ? "Studies will appear here once the first import is ready."
               : "We couldn’t load the saved studies. Please try again shortly."}
           </p>
-          {result.state === "error" && <Link href="/trials" className="mt-4 inline-block font-medium text-teal-800 underline">Try again</Link>}
+          {result.state === "error" && <Link href={trialsHref(filters, page)} className="mt-4 inline-block font-medium text-teal-800 underline">Try again</Link>}
         </section>
       ) : (
         <section className="mt-8" aria-label="Saved trial listings">
           <p className="mb-5 text-sm text-slate-600">
-            {result.total.toLocaleString("en-GB")} saved studies · Latest source updates first
+            {result.total.toLocaleString("en-GB")} {filtered ? "matching" : "saved"} studies · Latest source updates first
           </p>
           {result.trials.length ? (
             <div className="space-y-5">
@@ -58,16 +64,16 @@ export default async function TrialsPage({
             </div>
           ) : (
             <p className="rounded-xl border border-slate-200 bg-white p-8 text-slate-600">
-              {page === 1 ? "No studies have been imported yet." : "There are no studies on this page."}
+              {page !== 1 ? "There are no studies on this page." : filtered ? "No studies match these filters. Try removing a filter or selecting other countries." : "No studies have been imported yet."}
             </p>
           )}
           <nav aria-label="Trial pages" className="mt-8 flex items-center justify-between gap-4 text-sm">
-            {page > 1 ? <Link className="font-medium text-teal-800 underline" href={`/trials?page=${page - 1}`}>Previous</Link> : <span />}
+            {page > 1 ? <Link className="font-medium text-teal-800 underline" href={trialsHref(filters, page - 1)}>Previous</Link> : <span />}
             <span>Page {page} of {Math.max(1, Math.ceil(result.total / TRIALS_PER_PAGE))}</span>
             {page * TRIALS_PER_PAGE < result.total
-              ? <Link className="font-medium text-teal-800 underline" href={`/trials?page=${page + 1}`}>Next</Link>
+              ? <Link className="font-medium text-teal-800 underline" href={trialsHref(filters, page + 1)}>Next</Link>
               : page > 1 && !result.trials.length
-                ? <Link className="font-medium text-teal-800 underline" href="/trials">First page</Link>
+                ? <Link className="font-medium text-teal-800 underline" href={trialsHref(filters)}>First page</Link>
                 : <span />}
           </nav>
         </section>

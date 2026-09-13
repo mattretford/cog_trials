@@ -20,9 +20,9 @@ setup state until Supabase is configured. No authentication is needed to read tr
 1. Create a new project named **Cog Trials** in your Supabase dashboard. Choose a
    region near you and save the database password securely. Supabase creates the
    Postgres database as part of the project; no separate database creation is needed.
-2. In that project's **SQL Editor**, paste and run
-   [`supabase/migrations/202609130001_create_trials.sql`](supabase/migrations/202609130001_create_trials.sql)
-   once. It creates the `trials` table, index, permissions, and row-level security.
+2. Follow **Database migrations** below to log in, link the project, and run
+   `npm run db:migrate`. On a new database this applies both migrations: the trials
+   table and permissions, then the filtering functions.
 3. Copy the environment template:
 
    ```bash
@@ -35,9 +35,84 @@ setup state until Supabase is configured. No authentication is needed to read tr
    - `SUPABASE_SECRET_KEY`: an `sb_secret_...` key for the owner-run importer.
 
    Do not commit `.env.local`, paste the secret into chat, or prefix it with
-   `NEXT_PUBLIC_`. The database password is not used by this app. The secret key is
-   only read by `scripts/ingest-trials.ts`; the website uses the publishable key.
+   `NEXT_PUBLIC_`. The app does not use the database password; the CLI may ask for
+   it when linking or migrating. The secret key is only read by
+   `scripts/ingest-trials.ts`; the website uses the publishable key.
 5. Run the import, then restart `npm run dev` to load the environment variables.
+
+## Database migrations
+
+The Supabase CLI is a pinned development dependency. `supabase/config.toml` is
+already initialised and migration files live in `supabase/migrations/`.
+
+### Link your project once
+
+From the repository root:
+
+```bash
+npm run db:login
+npm run db:link -- --project-ref YOUR_PROJECT_REF
+npm run db:status
+```
+
+Replace `YOUR_PROJECT_REF` with the ID in your Supabase dashboard URL:
+`https://supabase.com/dashboard/project/YOUR_PROJECT_REF`. Complete the CLI login
+and any database-password prompt in your terminal. App publishable/secret keys
+in `.env.local` do not authenticate the CLI. Never commit access tokens or database
+passwords. CLI linking state in `supabase/.temp/` is ignored by Git.
+
+### If you already ran SQL manually
+
+SQL Editor execution does not populate the CLI's migration history. Check
+`npm run db:status`, and **only for a migration whose complete SQL was already
+successfully applied to this project**, record that version as applied:
+
+```bash
+# Only if the create_trials migration was already run successfully:
+npx supabase migration repair 202609130001 --status applied --linked
+```
+
+If you also already ran the trial_filters migration successfully, record it too:
+
+```bash
+npx supabase migration repair 202609130002 --status applied --linked
+```
+
+These commands update migration history; they do not execute or verify the SQL.
+Do not mark pending migrations as applied. On a fresh database, skip both repair
+commands. If you are unsure whether the schema matches a migration, check it
+before repairing history.
+
+### Apply pending changes
+
+```bash
+npm run db:status
+npm run db:plan
+npm run db:migrate
+npm run db:status
+```
+
+`db:plan` previews pending files. `db:migrate` applies pending SQL files in order
+to the **linked remote database** and records their versions. Already recorded
+migrations are skipped. These commands explicitly skip vault changes and do not
+seed or re-import studies. Existing trial data is preserved by the two current
+migrations. Reload `/trials` once the filtering migration has been applied.
+
+This remote migration workflow does not require a local Docker stack. Migrations
+run as an explicit maintenance command, not during Next.js startup or page requests.
+The local PGlite tests verify SQL independently of a remote connection; running the
+commands above still requires your own Supabase login and linked project.
+
+### Future schema changes
+
+```bash
+npm run db:migration:new -- descriptive_change_name
+```
+
+Write SQL in the generated file, then preview and apply it with the same commands.
+Keep applied migrations unchanged; add a new migration for subsequent changes.
+Commit migration files and `config.toml` alongside the application changes.
+See the [Supabase migration workflow](https://supabase.com/docs/guides/local-development/cli-workflows).
 
 ## Import studies
 
@@ -85,6 +160,40 @@ query scope, not which individual term matched. The UI shows the current configu
 scope, source update dates, and each row's import date, rather than claiming a
 complete collection-wide refresh. Scheduling, resumable jobs, and pruning can be
 added later if needed.
+
+## Filter saved studies
+
+Apply pending migrations with `npm run db:migrate` after the one-time CLI setup
+above, then reload `/trials`. This applies
+[`202609130002_trial_filters.sql`](supabase/migrations/202609130002_trial_filters.sql)
+if it is pending. Existing studies work immediately: no re-import is required.
+
+The UI supports recruitment status, phase, study type, intervention type, a
+case-insensitive lead-sponsor name search, and a searchable country multi-select.
+Choose options and click **Apply filters**. Multiple countries mean **any** selected
+country; separate filter fields combine with **AND**. Location matching means a
+listed study site in that country, regardless of its recruitment status. Missing
+location records match only when no country is selected. Phase 1/2 studies match
+either phase; “Not applicable” is a distinct phase option.
+
+Options are drawn from all saved, readable studies, rather than the current page
+or filtered results. Country search narrows only the option list, preserving
+already selected countries. **Clear all filters** resets both applied and unsaved
+selections. Applying filters starts at page one; pagination keeps the active
+filters in the URL, so filtered results can be bookmarked and shared.
+
+`lib/clinical-trials/filters.ts` parses and serialises URL state. The read-only
+`filter_trials` SQL function filters in Postgres **before** counting and pagination.
+`trial_filter_options` returns distinct options as one JSON object, avoiding API
+row limits. Both functions use invoker permissions and respect the table's RLS.
+Parameters are passed as structured RPC arguments; sponsor text is a literal
+substring, so `%` and `_` do not become wildcard or query syntax.
+
+The country picker is a small Client Component for local search and selections.
+The rest of the filter form uses native GET submission; result fetching stays in
+the Server Component. The new SQL is tested using PGlite (embedded Postgres) against
+fixtures and the actual migrations, including multi-country matching, combined
+filters, counts, pagination, and permissions. PGlite is a test-only dependency.
 
 ## Normalised data
 
@@ -150,7 +259,7 @@ npm run build
 
 In environments that restrict Turbopack's local worker ports, validate with
 `npm run build -- --webpack`. `npm start` serves the resulting production build.
-Tests use simulated API responses to cover normalisation, missing data, multi-phase
+Ingestion tests use simulated API responses to cover normalisation, missing data, multi-phase
 studies, pagination, duplicate IDs, retries, and partial/failing imports. A dry run
 verifies the live API but does **not** test database permissions or persistence.
 

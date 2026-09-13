@@ -8,7 +8,13 @@
     "start": "next start",
     "lint": "eslint",
     "ingest:trials": "node --env-file-if-exists=.env.local scripts/ingest-trials.ts",
-    "test": "node --test tests/*.test.ts"
+    "test": "node --test tests/*.test.ts",
+    "db:login": "supabase login",
+    "db:link": "supabase link",
+    "db:status": "supabase migration list --linked",
+    "db:plan": "supabase db push --linked --skip-vault --dry-run",
+    "db:migrate": "supabase db push --linked --skip-vault",
+    "db:migration:new": "supabase migration new"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
@@ -19,12 +25,14 @@
     "zod": "^4.6.4"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "supabase": "2.117.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
